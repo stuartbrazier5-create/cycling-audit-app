@@ -2,14 +2,15 @@ import streamlit as st
 import pandas as pd
 import fitparse
 import plotly.express as px
+from io import BytesIO
 
-st.set_page_config(page_title="Diesel Audit", layout="wide")
-st.title("🚴‍♂️ The Diesel Audit Dashboard")
+st.set_page_config(page_title="Diesel Audit Pro", layout="wide")
+st.title("🚴‍♂️ The Diesel Audit: Full Data Explorer")
 
 uploaded_file = st.file_uploader("Upload .fit file", type='fit')
 
 if uploaded_file:
-    with st.spinner("Decoding your ride..."):
+    with st.spinner("Processing full dataset..."):
         fitfile = fitparse.FitFile(uploaded_file)
         data = []
         for record in fitfile.get_messages('record'):
@@ -17,25 +18,46 @@ if uploaded_file:
             data.append(r)
         
         df = pd.DataFrame(data)
-        df = df.dropna(subset=['power', 'heart_rate'])
+        # Standardize columns
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-    
-    # Big Metrics
-    avg_p = df['power'].mean()
-    avg_h = df['heart_rate'].mean()
-    
-    c1, c2 = st.columns(2)
-    c1.metric("Avg Power", f"{avg_p:.1f}W")
-    c2.metric("Avg Heart Rate", f"{avg_h:.0f}BPM")
+        df = df.dropna(subset=['power', 'heart_rate']).reset_index(drop=True)
 
-    # Decoupling (First half vs Second half)
-    mid = len(df) // 2
-    ef1 = df.iloc[:mid]['power'].mean() / df.iloc[:mid]['heart_rate'].mean()
-    ef2 = df.iloc[mid:]['power'].mean() / df.iloc[mid:]['heart_rate'].mean()
-    drift = ((ef1 - ef2) / ef1) * 100
-    
-    st.subheader(f"Aerobic Decoupling: {drift:.2f}%")
-    
-    # Visualization
-    fig = px.line(df, x='timestamp', y=['power', 'heart_rate'], title="Ride Consistency")
+    # --- 1. DATA EXPORT SECTION ---
+    st.subheader("📥 Data Converter")
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Full Ride Data (CSV)",
+        data=csv,
+        file_name="diesel_audit_full_data.csv",
+        mime="text/csv",
+    )
+
+    # --- 2. THE BIG PICTURE ---
+    st.subheader("📈 Performance Overview")
+    fig = px.line(df, x='timestamp', y=['power', 'heart_rate', 'cadence'], 
+                  title="Full Ride Timeline")
     st.plotly_chart(fig, use_container_width=True)
+
+    # --- 3. FATIGUE & STABILITY ANALYSIS ---
+    st.subheader("🔍 Fatigue & Technique Audit")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Looking for 'sag' in cadence over the 4 hours
+        st.write("**Cadence vs. Power (Technique Stability)**")
+        fig_cad = px.scatter(df, x='power', y='cadence', color='heart_rate', 
+                             opacity=0.5, title="Cadence Distribution")
+        st.plotly_chart(fig_cad)
+
+    with col2:
+        # Decoupling Calculation
+        mid = len(df) // 2
+        ef1 = df.iloc[:mid]['power'].mean() / df.iloc[:mid]['heart_rate'].mean()
+        ef2 = df.iloc[mid:]['power'].mean() / df.iloc[mid:]['heart_rate'].mean()
+        drift = ((ef1 - ef2) / ef1) * 100
+        st.write(f"**Aerobic Decoupling: {drift:.2f}%**")
+        st.write("This measures how much your efficiency dropped in the second half.")
+
+    # --- 4. RAW DATA TABLE ---
+    st.subheader("📑 Every Record (Second-by-Second)")
+    st.dataframe(df, use_container_width=True)
